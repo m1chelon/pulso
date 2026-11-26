@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#131615">
+  <meta name="description" content="Acompanhe seu treino de hipertrofia, veja como executar os exercícios e registre suas séries.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./assets/icon-192.png">
+  <link rel="apple-touch-icon" href="./assets/icon-180.png">
+  <link rel="stylesheet" href="./styles.css">
+  <title>Pulso | Diário de treino</title>
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <header class="top">
+    <div class="shell top-inner">
+      <a class="brand" href="#" data-action="home"><img src="./assets/icon-192.png" width="37" height="37" alt=""><span>Pulso</span></a>
+      <nav class="tabs" aria-label="Navegação principal">
+        <button type="button" data-action="home" aria-current="page">Treino</button>
+        <button type="button" data-action="history">Histórico</button>
+      </nav>
+    </div>
+  </header>
+  <main class="shell main" id="main">
+    <noscript>Ative o JavaScript para abrir o Pulso.</noscript>
+  </main>
+  <p id="status" class="visually-hidden" role="status"></p>
+  <dialog id="modal" aria-labelledby="modal-title"></dialog>
+</body>
+</html>
