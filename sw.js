@@ -2,15 +2,17 @@ import { exercicios } from "./catalogo.js";
 
 const base = new URL("./", self.registration.scope);
 const prefixo = `pulso-web@${base.pathname}:`;
-const chave = prefixo + "v1";
+const chave = prefixo + "v2";
 const arquivos = [
-  "index.html", "app.js", "styles.css", "catalogo.js", "diario.js", "manifest.webmanifest",
-  "assets/icon-180.png", "assets/icon-192.png", "assets/icon-512.png",
+  "index.html", "app.js", "styles.css", "catalogo.js", "diario.js", "agenda.js", "calendario.js", "manifest.webmanifest",
+  "assets/capivara.webp", "assets/icon-180.png", "assets/icon-192.png", "assets/icon-512.png",
   ...Object.values(exercicios).flatMap((exercicio) => exercicio.fotos.map((foto) => "assets/photos/" + foto)),
 ];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(chave).then((cache) => cache.addAll(arquivos.map((arquivo) => new URL(arquivo, base)))));
+  event.waitUntil(caches.open(chave)
+    .then((cache) => cache.addAll(arquivos.map((arquivo) => new URL(arquivo, base))))
+    .then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", (event) => {

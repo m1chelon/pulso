@@ -1,3 +1,5 @@
+import { exercicios } from "./catalogo.js";
+
 export const CHAVE = "pulso.diario.v1";
 
 export const dias = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
@@ -80,6 +82,11 @@ export function salvarDiario(storage, sessoes) {
 function sessaoValida(item) {
   return item && typeof item.id === "string" && /^[0-9a-f-]{36}$/i.test(item.id) && typeof item.treinoId === "string"
     && Number.isFinite(Date.parse(item.inicio)) && (item.fim === null || Number.isFinite(Date.parse(item.fim)))
+    && (item.ocorrenciaId === undefined || (typeof item.ocorrenciaId === "string"
+      && /^\d{4}-\d{2}-\d{2}\/[a-z-]+$/.test(item.ocorrenciaId) && item.ocorrenciaId.endsWith("/" + item.treinoId)))
+    && (item.diaPlanejado === undefined || (typeof item.diaPlanejado === "string" && /^\d{4}-\d{2}-\d{2}$/.test(item.diaPlanejado)))
+    && (item.exercicios === undefined || (Array.isArray(item.exercicios) && item.exercicios.length > 0
+      && new Set(item.exercicios).size === item.exercicios.length && item.exercicios.every((id) => Object.hasOwn(exercicios, id))))
     && item.registros && !Array.isArray(item.registros) && typeof item.registros === "object"
     && Object.values(item.registros).every((series) => Array.isArray(series) && series.every(serieValida));
 }

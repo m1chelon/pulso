@@ -5,9 +5,11 @@ Diário web de treino de hipertrofia para iPhone e outros navegadores. Abre no t
 | Dia | Treino |
 |---|---|
 | Terça | Superiores A |
-| Quinta | Inferiores A |
+| Quarta | Inferiores A |
 | Sábado | Superiores B |
 | Domingo | Inferiores B |
+
+O calendário mostra os treinos do mês e permite marcar **Fiz** ou **Não fiz** por exercício. Nas sessões que ainda não começaram, você pode mudar a data do treino, reorganizar a lista e mover um exercício para outro treino disponível. As mudanças valem para a sessão escolhida.
 
 O catálogo reúne 15 exercícios com fotos e instruções em português. O diário registra séries, repetições, carga e tempo de prancha. Os registros ficam no navegador de cada aparelho. Após a primeira carga completa em HTTPS, o app usa um cache local para abrir offline em navegadores compatíveis.
 

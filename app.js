@@ -1,15 +1,26 @@
 import { exercicios, plano } from "./catalogo.js";
 import {
-  CHAVE, cargaFormatada, criarSessao, dataCurta, dataLonga, dias, lerDiario,
-  lerSerie, proximoTreino, salvarDiario, sessaoAtual, totalRegistrado, treinoDoDia, ultimaCarga,
+  CHAVE, cargaFormatada, criarSessao, dataCurta, dataLonga, diaLocal, lerDiario,
+  lerSerie, salvarDiario, totalRegistrado, ultimaCarga,
 } from "./diario.js";
+
+import {
+  CHAVE_AGENDA, chaveValida, dataCivil, dataDoCalendario, identificadorDeSessao, lerAgenda, listaValida,
+  marcarExercicio, marcarTreino, moverTreino, novaAgenda, ocorrencia, proximosTreinos, reordenar,
+  salvarAgenda, somarDias, transferirExercicio, treinosDoDia,
+} from "./agenda.js";
+import { listaOrganizador, painelChecklist, quadroCalendario, resumoTreino } from "./calendario.js";
 
 const main = document.querySelector("#main");
 const modal = document.querySelector("#modal");
 const status = document.querySelector("#status");
 const porId = new Map(plano.map((treino) => [treino.id, treino]));
 let sessoes = [];
+let agenda = novaAgenda();
 let erroLeitura = false;
+let erroAgenda = false;
+let dataSelecionada = diaLocal(new Date());
+let mesCalendario = dataCivil(dataSelecionada);
 let erroGravacao = false;
 let selecionado;
 let renderizacaoPendente = false;
@@ -22,21 +33,19 @@ function carregar() {
   } catch {
     erroLeitura = true;
   }
+  try {
+    agenda = lerAgenda(localStorage);
+    erroAgenda = false;
+  } catch {
+    erroAgenda = true;
+  }
 }
 
 function anunciar(mensagem) {
   status.textContent = mensagem;
 }
 
-async function modificar(operacao) {
-  const executar = () => {
-    const atuais = lerDiario(localStorage);
-    const resultado = operacao(atuais);
-    salvarDiario(localStorage, atuais);
-    sessoes = atuais;
-    erroLeitura = erroGravacao = false;
-    return resultado;
-  };
+async function transacionar(executar) {
   try {
     return await (navigator.locks ? navigator.locks.request(CHAVE, executar) : executar());
   } catch {
@@ -48,11 +57,42 @@ async function modificar(operacao) {
   }
 }
 
+function modificar(operacao) {
+  return transacionar(() => {
+    const atuais = lerDiario(localStorage);
+    const resultado = operacao(atuais);
+    if (resultado !== false) salvarDiario(localStorage, atuais);
+    sessoes = atuais;
+    erroLeitura = erroGravacao = false;
+    return resultado;
+  });
+}
+
+async function modificarAgenda(operacao, mensagem) {
+  const ok = await transacionar(() => {
+    const atual = lerAgenda(localStorage);
+    const registros = lerDiario(localStorage);
+    const alterado = operacao(atual, registros);
+    if (alterado) salvarAgenda(localStorage, atual);
+    agenda = atual;
+    sessoes = registros;
+    erroAgenda = erroLeitura = erroGravacao = false;
+    return alterado;
+  });
+  if (ok) anunciar(mensagem);
+  else if (ok === false) {
+    const aviso = modal.open ? modal.querySelector("[data-erro]") : null;
+    if (aviso) aviso.textContent = "Esse remanejamento não está mais disponível.";
+    else anunciar("O treino foi atualizado em outra aba.");
+  }
+  return ok;
+}
+
 function avisoDiario() {
-  if (!erroLeitura && !erroGravacao) return "";
-  return `<p class="warning" role="alert">${erroLeitura
-    ? "O diário local está indisponível. Recarregue a página para tentar novamente."
-    : "O navegador não conseguiu salvar. Tente novamente."}</p>`;
+  if (!erroLeitura && !erroAgenda && !erroGravacao) return "";
+  const mensagem = erroLeitura ? "O diário local está indisponível." : erroAgenda
+    ? "O calendário local está indisponível." : "O navegador não conseguiu salvar a alteração.";
+  return `<p class="warning" role="alert">${mensagem} Recarregue a página para tentar novamente.</p>`;
 }
 
 function objetivo(e) {
@@ -67,10 +107,14 @@ function foto(e, i = 0) {
   return "./assets/photos/" + e.fotos[i];
 }
 
-function acao(treino, atual) {
-  const sessao = sessaoAtual(sessoes, treino.id, atual);
-  const texto = sessao?.fim ? "Ver sessão" : sessao ? "Retomar treino" : "Iniciar treino";
-  return `<button class="primary" type="button" data-action="start" data-id="${treino.id}">${texto}</button>`;
+function botaoSessao(item) {
+  const texto = item.sessao?.fim ? "Ver sessão" : item.sessao ? "Retomar treino" : "Iniciar treino";
+  return `<button class="primary" type="button" data-action="start" data-slot="${item.chave}">${texto}</button>`;
+}
+
+function dadosDaSessao(sessao) {
+  const base = porId.get(sessao.treinoId);
+  return { ...base, exercicios: listaValida(sessao.exercicios) ? sessao.exercicios : base.exercicios };
 }
 
 function cabecalho(titulo, detalhe) {
@@ -93,16 +137,19 @@ function listaPlano(treino) {
 
 function telaTreino() {
   const agora = new Date();
-  const hoje = treinoDoDia(plano, agora);
-  const pendente = [...sessoes].reverse().find((sessao) => !sessao.fim && porId.has(sessao.treinoId));
-  const treino = porId.get(selecionado) ?? porId.get(pendente?.treinoId) ?? hoje ?? proximoTreino(plano, agora);
-  const sessao = sessaoAtual(sessoes, treino.id, agora);
-  const rotulo = sessao?.fim ? "Concluído hoje" : sessao ? "Em andamento"
-    : treino.id === hoje?.id ? "Treino de hoje" : !selecionado && !hoje ? "Próximo treino" : dias[treino.dia];
-  const fotoDestaque = foto(exercicios[treino.exercicios[0]]);
-  const diasDaSemana = plano.map((dia) => `<li>
-    <button class="week-day" type="button" data-action="day" data-id="${dia.id}" aria-pressed="${treino.id === dia.id}">
-      <span><small>${dias[dia.dia]}${dia.id === hoje?.id ? " · Hoje" : ""}</small><strong>${dia.nome}</strong></span>
+  const hoje = diaLocal(agora);
+  const segunda = somarDias(hoje, -((agora.getDay() + 6) % 7));
+  const pendente = sessoes.findLast((sessao) => !sessao.fim && porId.has(sessao.treinoId));
+  const semana = proximosTreinos(agenda, segunda, 7, sessoes);
+  const proximos = proximosTreinos(agenda, hoje, 15, sessoes);
+  const item = (selecionado && ocorrencia(agenda, selecionado, sessoes))
+    || (pendente && ocorrencia(agenda, identificadorDeSessao(pendente), sessoes))
+    || proximos[0];
+  const rotulo = item && (item.sessao?.fim ? "Sessão concluída" : item.sessao ? "Em andamento"
+    : item.data === hoje ? "Treino de hoje" : selecionado ? dataDoCalendario(item.data) : "Próximo treino");
+  const diasDaSemana = semana.map((dia) => `<li>
+    <button class="week-day" type="button" data-action="day" data-slot="${dia.chave}" aria-pressed="${dia.chave === item?.chave}">
+      <span><small>${dataDoCalendario(dia.data)}</small><strong>${dia.treino.nome}</strong></span>
       <span class="chevron" aria-hidden="true">›</span>
     </button>
   </li>`).join("");
@@ -110,19 +157,49 @@ function telaTreino() {
   return `${cabecalho("Seu treino", dataLonga(agora))}
     ${avisoDiario()}
     <section class="hero" aria-labelledby="treino-destaque">
-      <img class="hero-image" src="${fotoDestaque}" alt="" width="850" height="567">
       <div class="hero-content">
-        <p class="hero-state"><span aria-hidden="true"></span>${rotulo}</p>
-        <h2 id="treino-destaque">${treino.nome}</h2>
-        <p class="hero-description">${treino.descricao}</p>
-        <p class="hero-count">${treino.exercicios.length} exercícios · ${contagem(treino)} séries</p>
-        ${acao(treino, agora)}
+        ${item ? `<p class="hero-state">${rotulo}</p>
+          <h2 id="treino-destaque">${item.treino.nome}</h2>
+          <p class="hero-description">${item.treino.descricao}</p>
+          <p class="hero-count">${item.exercicios.length} exercícios · ${contagem(item)} séries</p>
+          <div class="hero-actions">${botaoSessao(item)}
+            <button class="secondary" type="button" data-action="calendar" data-date="${item.data}">Checklist</button>
+          </div>` : `<h2 id="treino-destaque">Dia de descanso</h2>
+            <button class="primary" type="button" data-action="calendar">Abrir calendário</button>`}
       </div>
+      <img class="hero-mascot" src="./assets/capivara.webp" alt="Capivara com faixa verde e um halter" width="320" height="320">
     </section>
     <div class="dashboard-grid">
-      <section class="panel week" aria-labelledby="semana"><h2 id="semana">Plano semanal</h2><ul>${diasDaSemana}</ul></section>
-      <section class="panel exercises" aria-labelledby="lista"><h2 id="lista">Exercícios</h2><ul>${listaPlano(treino)}</ul></section>
+      <section class="panel week" aria-labelledby="semana"><h2 id="semana">Plano semanal</h2>
+        ${diasDaSemana ? `<ul>${diasDaSemana}</ul>` : '<p class="muted">Nenhum treino nesta semana.</p>'}
+        <button class="glass-button calendar-link" type="button" data-action="calendar">Abrir calendário</button>
+      </section>
+      ${item ? `<section class="panel exercises" aria-labelledby="lista">
+        <div class="section-heading"><h2 id="lista">Exercícios</h2><div class="check-state">${resumoTreino(agenda, item)}</div></div>
+        <ul>${listaPlano(item)}</ul>
+      </section>` : ""}
     </div>`;
+}
+
+function telaCalendario() {
+  const itens = treinosDoDia(agenda, dataSelecionada, sessoes);
+  return `${cabecalho("Calendário", "")}${avisoDiario()}
+    <div class="calendar-layout">
+      ${quadroCalendario(agenda, sessoes, mesCalendario, dataSelecionada)}
+      <section class="calendar-detail" aria-labelledby="calendar-selection">
+        <h2 id="calendar-selection">${dataDoCalendario(dataSelecionada)}</h2>
+        ${itens.length ? itens.map((item) => painelChecklist(agenda, item)).join("")
+          : '<p class="panel empty-day">Dia de descanso.</p>'}
+      </section>
+    </div>`;
+}
+
+function abrirCalendario(data) {
+  if (data) {
+    dataSelecionada = data;
+    mesCalendario = dataCivil(data);
+  }
+  ir("#calendario");
 }
 
 function textoSeries(total) {
@@ -174,7 +251,8 @@ function cartaoExercicio(chave, sessao) {
 function telaSessao(sessao, treino) {
   const feitas = totalRegistrado(sessao);
   const total = contagem(treino);
-  return `<button type="button" class="back" data-action="${sessao.fim ? "history" : "home"}">‹ ${sessao.fim ? "Histórico" : "Plano semanal"}</button>
+  const dia = sessao.diaPlanejado ?? diaLocal(new Date(sessao.inicio));
+  return `<button type="button" class="back" data-action="${sessao.fim ? "history" : "calendar"}" data-date="${dia}">‹ ${sessao.fim ? "Histórico" : "Calendário"}</button>
     ${cabecalho(treino.nome, dataCurta(sessao.inicio))}
     ${avisoDiario()}
     <section class="session-progress" aria-labelledby="progresso">
@@ -190,6 +268,7 @@ function telaSessao(sessao, treino) {
 
 function rota() {
   const hash = location.hash.slice(1);
+  if (hash === "calendario") return { nome: "calendar" };
   if (hash === "historico") return { nome: "history" };
   if (hash.startsWith("sessao/")) {
     const sessao = sessoes.find((s) => s.id === hash.slice(7));
@@ -205,11 +284,13 @@ function renderizar(foco = false) {
   }
   const atual = rota();
   if (atual.nome === "history") main.innerHTML = telaHistorico();
-  else if (atual.nome === "session") main.innerHTML = telaSessao(atual.sessao, porId.get(atual.sessao.treinoId));
+  else if (atual.nome === "calendar") main.innerHTML = telaCalendario();
+  else if (atual.nome === "session") main.innerHTML = telaSessao(atual.sessao, dadosDaSessao(atual.sessao));
   else main.innerHTML = telaTreino();
-  const historico = atual.nome === "history" || Boolean(atual.sessao?.fim);
+  const abaAtual = atual.nome === "calendar" ? "calendar"
+    : atual.nome === "history" || atual.sessao?.fim ? "history" : "home";
   for (const aba of document.querySelectorAll(".tabs button")) {
-    if (aba.dataset.action === (historico ? "history" : "home")) aba.setAttribute("aria-current", "page");
+    if (aba.dataset.action === abaAtual) aba.setAttribute("aria-current", "page");
     else aba.removeAttribute("aria-current");
   }
   if (foco) {
@@ -224,10 +305,11 @@ function ir(hash) {
 }
 
 function abrirModal(conteudo, classe = "") {
-  focoAposFechar = document.activeElement;
+  if (!modal.open) focoAposFechar = document.activeElement;
   modal.className = classe;
   modal.innerHTML = conteudo;
-  modal.showModal();
+  if (!modal.open) modal.showModal();
+  else modal.querySelector(".close").focus();
   modal.scrollTop = 0;
 }
 
@@ -298,13 +380,143 @@ async function alterarSessao(sessao, operacao, mensagem) {
   return true;
 }
 
+function modalDeTreino(item) {
+  abrirModal(`${tituloModal("Mover treino", item.treino.nome + " · " + dataDoCalendario(item.data))}
+    <form class="agenda-form" data-form="move-day" data-slot="${item.chave}">
+      <label>Nova data<input type="date" name="destino" value="${item.data}" required></label>
+      <p class="form-note">Se a data já tiver um treino, os dois aparecem no calendário.</p>
+      <p class="form-error" role="alert" data-erro></p>
+      <button class="primary" type="submit">Salvar nova data</button>
+    </form>`, "agenda-modal");
+}
+
+function organizar(item) {
+  abrirModal(`${tituloModal("Organizar exercícios", item.treino.nome + " · " + dataDoCalendario(item.data))}
+    ${listaOrganizador(item)}
+    <p class="form-error" role="alert" data-erro></p>
+    <button class="primary" type="button" data-action="close">Concluir</button>`, "agenda-modal organize-modal");
+}
+
+function modalDeExercicio(item, id) {
+  const opcoes = proximosTreinos(agenda, somarDias(item.data, -7), 36, sessoes)
+    .filter((alvo) => alvo.chave !== item.chave && !alvo.sessao && !alvo.exercicios.includes(id));
+  abrirModal(`${tituloModal("Mover exercício", exercicios[id].nome)}
+    <form class="agenda-form" data-form="move-exercise" data-slot="${item.chave}" data-id="${id}">
+      ${opcoes.length ? `<label>Treino de destino<select name="destino" required>
+        <option value="">Escolha um treino</option>
+        ${opcoes.map((alvo) => `<option value="${alvo.chave}">${alvo.treino.nome} · ${dataDoCalendario(alvo.data)}</option>`).join("")}
+      </select></label>
+      <button class="primary" type="submit">Mover exercício</button>`
+        : '<p class="form-note">Nenhum treino disponível neste período.</p>'}
+      <p class="form-error" role="alert" data-erro></p>
+    </form>
+    <button class="secondary" type="button" data-action="organize" data-slot="${item.chave}">Voltar à lista</button>`, "agenda-modal");
+}
+
+function atualizarCalendario(action) {
+  renderizar();
+  main.querySelector(`[data-action="${action}"]`)?.focus({ preventScroll: true });
+}
+
+function recuperarSeletor(alvo) {
+  const { action, slot, id, mark } = alvo.dataset;
+  return `[data-action="${action}"][data-slot="${slot}"]`
+    + (id ? `[data-id="${id}"]` : "") + (mark ? `[data-mark="${mark}"]` : "");
+}
+
+async function agirNoCalendario(action, alvo, item) {
+  const { date, id, mark, slot, direction } = alvo.dataset;
+  switch (action) {
+    case "calendar": abrirCalendario(date); break;
+    case "calendar-day":
+      mesCalendario = dataCivil(date);
+      dataSelecionada = date;
+      renderizar();
+      main.querySelector(`[data-action="calendar-day"][data-date="${date}"]`)?.focus({ preventScroll: true });
+      anunciar(dataDoCalendario(date));
+      break;
+    case "calendar-prev":
+    case "calendar-next":
+      mesCalendario = new Date(mesCalendario.getFullYear(), mesCalendario.getMonth() + (action === "calendar-prev" ? -1 : 1), 1, 12);
+      dataSelecionada = diaLocal(mesCalendario);
+      atualizarCalendario(action);
+      anunciar(main.querySelector("#calendar-month").textContent);
+      break;
+    case "calendar-today":
+      dataSelecionada = diaLocal(new Date());
+      mesCalendario = dataCivil(dataSelecionada);
+      atualizarCalendario(action);
+      anunciar(dataDoCalendario(dataSelecionada));
+      break;
+    case "mark-exercise":
+    case "mark-workout": {
+      if (!item) break;
+      const marcou = await modificarAgenda((atual, registros) => {
+        const treino = ocorrencia(atual, slot, registros);
+        if (!treino) return false;
+        return action === "mark-workout" ? marcarTreino(atual, treino, mark) : marcarExercicio(atual, treino, id, mark);
+      }, "Checklist atualizado.");
+      if (marcou) {
+        renderizar();
+        main.querySelector(recuperarSeletor(alvo))?.focus({ preventScroll: true });
+      }
+      break;
+    }
+    case "move-day": if (item && !item.sessao) modalDeTreino(item); break;
+    case "organize": if (item && !item.sessao) organizar(item); break;
+    case "move-exercise":
+      if (item && !item.sessao && item.exercicios.includes(id) && item.exercicios.length > 1) modalDeExercicio(item, id);
+      break;
+    case "reorder": {
+      if (!item) break;
+      const mudou = await modificarAgenda((atual, registros) => {
+        const treino = ocorrencia(atual, slot, registros);
+        return treino && reordenar(atual, treino, id, Number(direction));
+      }, "Ordem atualizada.");
+      if (mudou && modal.open) {
+        const treino = ocorrencia(agenda, slot, sessoes);
+        const lista = modal.querySelector(".organizer-list");
+        if (!lista) break;
+        lista.outerHTML = listaOrganizador(treino);
+        const botoes = [...modal.querySelectorAll(`[data-action="reorder"][data-id="${id}"]`)];
+        (botoes.find((b) => b.dataset.direction === direction && !b.disabled)
+          ?? botoes.find((b) => !b.disabled))?.focus({ preventScroll: true });
+        renderizacaoPendente = true;
+      } else if (mudou) renderizar();
+      break;
+    }
+    default: return false;
+  }
+  return true;
+}
+
+async function salvarRemanejamento(form, dados) {
+  const { form: tipo, slot, id } = form.dataset;
+  const destino = dados.get("destino");
+  const ok = await modificarAgenda((atual, registros) => {
+    const de = ocorrencia(atual, slot, registros);
+    if (!de) return false;
+    if (tipo === "move-day") return moverTreino(atual, de, destino);
+    const para = typeof destino === "string" && chaveValida(destino) && ocorrencia(atual, destino, registros);
+    return para && transferirExercicio(atual, de, para, id);
+  }, tipo === "move-day" ? "Treino remanejado." : "Exercício remanejado.");
+  if (!ok) return;
+  if (tipo === "move-day") {
+    if (modal.open) modal.close();
+    abrirCalendario(destino);
+  } else if (modal.open) {
+    organizar(ocorrencia(agenda, slot, sessoes));
+    renderizacaoPendente = true;
+  } else renderizar();
+}
+
 async function acionar(event) {
   const alvo = event.target.closest("[data-action]");
   if (!alvo) return;
-  const { action, id } = alvo.dataset;
+  const { action, id, slot } = alvo.dataset;
   const num = Number(alvo.dataset.number);
   const atual = rota().sessao;
-  const treino = porId.get(id);
+  const treino = slot && ocorrencia(agenda, slot, sessoes);
   event.preventDefault();
 
   switch (action) {
@@ -312,18 +524,23 @@ async function acionar(event) {
     case "history": ir("#historico"); break;
     case "day":
       if (!treino) return;
-      selecionado = treino.id;
+      selecionado = treino.chave;
       renderizar();
-      document.querySelector(`[data-action="day"][data-id="${treino.id}"]`).focus({preventScroll: true});
-      anunciar(treino.nome);
+      main.querySelector(recuperarSeletor(alvo))?.focus({preventScroll: true});
+      anunciar(treino.treino.nome);
       break;
     case "start": {
       if (!treino) return;
       const idSessao = await modificar((itens) => {
-        const agora = new Date();
-        const existente = sessaoAtual(itens, treino.id, agora);
-        if (existente) return existente.id;
-        const nova = criarSessao(treino.id, agora);
+        const item = ocorrencia(lerAgenda(localStorage), slot, itens);
+        if (!item) return false;
+        if (item.sessao) return item.sessao.id;
+        const nova = {
+          ...criarSessao(item.treino.id, new Date()),
+          ocorrenciaId: item.chave,
+          diaPlanejado: item.data,
+          exercicios: [...item.exercicios],
+        };
         itens.push(nova);
         return nova.id;
       });
@@ -348,7 +565,7 @@ async function acionar(event) {
     case "finish":
     case "finish-confirm":
       if (!atual || totalRegistrado(atual) === 0) return;
-      if (action === "finish" && totalRegistrado(atual) < contagem(porId.get(atual.treinoId))) {
+      if (action === "finish" && totalRegistrado(atual) < contagem(dadosDaSessao(atual))) {
         confirmarFim(atual);
         return;
       }
@@ -357,6 +574,7 @@ async function acionar(event) {
         item.fim = new Date().toISOString();
       }, "Sessão finalizada.");
       break;
+    default: await agirNoCalendario(action, alvo, treino);
   }
 }
 
@@ -364,6 +582,10 @@ document.addEventListener("click", acionar);
 modal.addEventListener("submit", async (event) => {
   event.preventDefault();
   const dados = new FormData(event.target);
+  if (event.target.dataset.form) {
+    await salvarRemanejamento(event.target, dados);
+    return;
+  }
   const chave = event.target.dataset.id;
   const numero = Number(event.target.dataset.number);
   const serie = lerSerie(dados.get("quantidade"), dados.get("carga") ?? "");
@@ -393,7 +615,7 @@ window.addEventListener("hashchange", () => {
   renderizar(true);
 });
 window.addEventListener("storage", (event) => {
-  if (event.key === CHAVE || event.key === null) {
+  if (event.key === CHAVE || event.key === CHAVE_AGENDA || event.key === null) {
     carregar();
     renderizar();
   }

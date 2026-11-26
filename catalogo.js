@@ -286,7 +286,7 @@ export const plano = [
   },
   {
     "id": "inferior-a",
-    "dia": 4,
+    "dia": 3,
     "nome": "Inferiores A",
     "descricao": "Quadríceps, posteriores e abdômen",
     "exercicios": [
